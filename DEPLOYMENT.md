@@ -477,3 +477,476 @@ For issues or questions, check:
 - Nginx logs: `/var/log/nginx/`
 - System logs: `journalctl -u nginx`
 
+---
+
+# Hostinger Shared Hosting Deployment Guide
+
+This guide covers deploying the Virtual Office application on Hostinger shared hosting. Shared hosting has limitations compared to VPS, but this guide will help you work within those constraints.
+
+## Prerequisites
+
+- Hostinger shared hosting account with Node.js support
+- cPanel access
+- FTP access (or File Manager)
+- Domain name configured in Hostinger
+- MySQL database created in Hostinger
+
+## Step 1: Prepare Your Application Locally
+
+### 1.1 Build the React Client
+
+On your local machine, build the production version:
+
+```bash
+cd client
+npm install
+npm run build
+```
+
+This creates a `build` folder in the `client` directory.
+
+### 1.2 Prepare Environment Variables
+
+Create a `.env` file for production (you'll upload this later):
+
+```env
+# Server Configuration
+NODE_ENV=production
+PORT=3000
+CLIENT_URL=https://yourdomain.com
+
+# Database Configuration
+DB_HOST=localhost
+DB_USER=your_hostinger_db_user
+DB_PASSWORD=your_hostinger_db_password
+DB_NAME=your_hostinger_db_name
+
+# JWT Secret Key (Generate a strong random string)
+JWT_SECRET=your_super_secret_jwt_key_change_this_in_production
+
+# WebRTC STUN/TURN Servers
+STUN_SERVER=stun:stun.l.google.com:19302
+TURN_SERVER=
+TURN_USERNAME=
+TURN_PASSWORD=
+```
+
+Generate a secure JWT secret:
+```bash
+node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"
+```
+
+### 1.3 Create Client Environment File
+
+Create `client/.env.production`:
+
+```env
+REACT_APP_API_URL=https://yourdomain.com/api
+REACT_APP_SOCKET_URL=https://yourdomain.com
+```
+
+Rebuild the client after creating this file:
+```bash
+cd client
+npm run build
+```
+
+## Step 2: Database Setup in Hostinger
+
+### 2.1 Create MySQL Database
+
+1. Log into **cPanel**
+2. Go to **MySQL Databases**
+3. Create a new database (e.g., `yourusername_virtualoffice`)
+4. Create a new MySQL user
+5. Add the user to the database with **ALL PRIVILEGES**
+6. Note down:
+   - Database name: `yourusername_virtualoffice`
+   - Database user: `yourusername_dbuser`
+   - Database password: (the one you set)
+   - Database host: Usually `localhost` (check in cPanel)
+
+### 2.2 Initialize Database Schema
+
+You'll need to run the database initialization. You can do this via:
+
+**Option A: Using phpMyAdmin**
+1. Go to **phpMyAdmin** in cPanel
+2. Select your database
+3. Go to **SQL** tab
+4. Run the SQL commands from `server/config/initDatabase.js` (extract the SQL statements)
+
+**Option B: Using Node.js script (after deployment)**
+- We'll create a setup script you can run after deploying
+
+## Step 3: Upload Files via FTP
+
+### 3.1 Connect via FTP
+
+Use an FTP client (FileZilla, WinSCP, or cPanel File Manager):
+- **Host**: `ftp.yourdomain.com` or IP provided by Hostinger
+- **Username**: Your cPanel username
+- **Password**: Your cPanel password
+- **Port**: 21 (or 22 for SFTP)
+
+### 3.2 Upload Project Files
+
+Upload the following structure to your `public_html` or root directory:
+
+```
+public_html/
+├── server/
+│   ├── config/
+│   ├── middleware/
+│   ├── routes/
+│   ├── socket/
+│   ├── uploads/
+│   │   ├── profiles/
+│   │   └── rooms/
+│   ├── index.js
+│   └── package.json
+├── client/
+│   └── build/          (entire build folder contents)
+├── .env
+├── package.json
+└── package-lock.json
+```
+
+**Important Notes:**
+- Upload `server` folder contents
+- Upload `client/build` folder contents directly to `public_html` (or keep in `client/build`)
+- Create `server/uploads/profiles` and `server/uploads/rooms` folders with write permissions (755)
+
+## Step 4: Create Node.js App in Hostinger
+
+### 4.1 Access Node.js App Manager
+
+1. Log into **cPanel**
+2. Find **Node.js** or **Node.js App** section
+3. Click **Create Application**
+
+### 4.2 Configure Node.js Application
+
+Fill in the form:
+
+- **Node.js Version**: Select latest stable (18.x or 20.x)
+- **Application Mode**: Production
+- **Application Root**: `public_html` (or your chosen directory)
+- **Application URL**: Leave default or set to your domain
+- **Application Startup File**: `server/index.js`
+- **Application Port**: Usually auto-assigned (note this number)
+- **Node.js Modules**: Will be installed automatically
+
+### 4.3 Install Dependencies
+
+After creating the app, Hostinger will show you an option to install dependencies. Click **Install Dependencies** or run:
+
+```bash
+npm install --production
+```
+
+**Note**: If you need to install manually via SSH (if available):
+```bash
+cd ~/public_html
+npm install --production
+```
+
+## Step 5: Configure Environment Variables
+
+### 5.1 Set Environment Variables in Node.js App
+
+In the Node.js App Manager in cPanel:
+
+1. Find your application
+2. Click **Edit** or **Environment Variables**
+3. Add these variables:
+   - `NODE_ENV=production`
+   - `PORT=3000` (or the port assigned by Hostinger)
+   - `CLIENT_URL=https://yourdomain.com`
+   - `DB_HOST=localhost`
+   - `DB_USER=your_hostinger_db_user`
+   - `DB_PASSWORD=your_hostinger_db_password`
+   - `DB_NAME=your_hostinger_db_name`
+   - `JWT_SECRET=your_generated_jwt_secret`
+
+**Alternative**: If you uploaded a `.env` file, make sure it's in the root directory and Node.js can read it.
+
+## Step 6: Configure Server to Serve Static Files
+
+### 6.1 Update server/index.js
+
+Make sure your `server/index.js` serves static files in production. It should already have this, but verify:
+
+```javascript
+// Serve static files from React app (in production)
+if (process.env.NODE_ENV === 'production') {
+  app.use(express.static(path.join(__dirname, '../client/build')));
+  
+  // Serve React app for all non-API routes
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, '../client/build/index.html'));
+  });
+}
+```
+
+### 6.2 Update File Paths
+
+Since Hostinger may use different directory structures, you might need to adjust paths. Check your actual directory structure and update accordingly.
+
+## Step 7: Create .htaccess for Routing (If Needed)
+
+If your React app routes aren't working, create `.htaccess` in `public_html`:
+
+```apache
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+  RewriteRule ^index\.html$ - [L]
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteRule . /index.html [L]
+</IfModule>
+```
+
+**Note**: This may not be needed if Node.js is handling all routing.
+
+## Step 8: Initialize Database
+
+### 8.1 Create Database Setup Script
+
+Create `setup-db.js` in the root:
+
+```javascript
+require('dotenv').config();
+const db = require('./server/config/database');
+const initDatabase = require('./server/config/initDatabase');
+
+async function setup() {
+  try {
+    await initDatabase();
+    console.log('Database initialized successfully!');
+    process.exit(0);
+  } catch (error) {
+    console.error('Database setup failed:', error);
+    process.exit(1);
+  }
+}
+
+setup();
+```
+
+### 8.2 Run Database Setup
+
+**Option A: Via Node.js App Manager**
+- Some Hostinger panels allow running scripts
+- Look for "Run Script" or "Console" option
+
+**Option B: Via SSH (if available)**
+```bash
+cd ~/public_html
+node setup-db.js
+```
+
+**Option C: Via phpMyAdmin**
+- Manually run SQL statements from `server/config/initDatabase.js`
+
+## Step 9: Set File Permissions
+
+### 9.1 Set Upload Directory Permissions
+
+Using File Manager or FTP:
+
+1. Navigate to `server/uploads`
+2. Set permissions:
+   - `profiles/` folder: **755** or **775**
+   - `rooms/` folder: **755** or **775**
+
+In cPanel File Manager:
+- Right-click folder → **Change Permissions**
+- Set to **755** (or **775** if 755 doesn't work)
+
+## Step 10: Start/Restart Node.js Application
+
+1. Go to **Node.js App Manager** in cPanel
+2. Find your application
+3. Click **Restart** or **Start**
+
+The application should now be running!
+
+## Step 11: Configure Domain and SSL
+
+### 11.1 Point Domain to Application
+
+1. In cPanel, go to **Domains** or **Subdomains**
+2. Point your domain to the Node.js app directory
+3. Or configure the Node.js app URL to match your domain
+
+### 11.2 Enable SSL Certificate
+
+1. Go to **SSL/TLS Status** in cPanel
+2. Select your domain
+3. Click **Run AutoSSL** or install Let's Encrypt certificate
+4. Force HTTPS redirect if available
+
+## Step 12: Verify Deployment
+
+### 12.1 Check Application Status
+
+- Visit `https://yourdomain.com`
+- Check Node.js App Manager for status and logs
+- Test registration/login
+- Test room creation
+- Test audio/video calls
+
+### 12.2 Check Logs
+
+In Node.js App Manager, check:
+- **Application Logs** - for server errors
+- **Error Logs** - for runtime errors
+
+## Troubleshooting for Hostinger
+
+### Application won't start
+
+1. **Check Node.js version**: Ensure compatible version (18.x recommended)
+2. **Check port**: Verify the port in environment variables matches Hostinger's assigned port
+3. **Check logs**: Review application logs in Node.js App Manager
+4. **Check dependencies**: Ensure all npm packages are installed
+5. **Check file paths**: Verify all paths are correct for Hostinger's directory structure
+
+### Database connection issues
+
+1. **Verify credentials**: Double-check database name, user, password in cPanel
+2. **Check host**: Usually `localhost`, but verify in cPanel MySQL section
+3. **Test connection**: Try connecting via phpMyAdmin first
+4. **Check user privileges**: Ensure database user has ALL PRIVILEGES
+
+### Static files not loading
+
+1. **Check build folder**: Ensure `client/build` contents are uploaded correctly
+2. **Check paths**: Verify paths in `server/index.js` match your directory structure
+3. **Check permissions**: Ensure files have read permissions (644)
+4. **Check .htaccess**: May need to configure for static file serving
+
+### Socket.IO not working
+
+1. **Check CORS**: Verify `CLIENT_URL` in environment variables
+2. **Check port**: Ensure Socket.IO uses the same port as the server
+3. **Check firewall**: Some shared hosts block WebSocket connections
+4. **Use polling fallback**: Socket.IO should automatically fallback to polling
+
+### Port issues
+
+- Hostinger assigns ports automatically (usually 3000-30000)
+- Use the port assigned in Node.js App Manager
+- Don't hardcode port 5000 - use environment variable
+
+### File upload issues
+
+1. **Check permissions**: Upload directories need write access (755 or 775)
+2. **Check disk space**: Ensure you have enough storage
+3. **Check file size limits**: Hostinger may have upload size limits
+4. **Check multer config**: Verify multer is configured correctly
+
+## Hostinger-Specific Limitations
+
+1. **No PM2**: Hostinger manages Node.js processes automatically
+2. **Limited ports**: Can only use assigned ports
+3. **No SSH access**: On basic shared plans (premium may have SSH)
+4. **Resource limits**: CPU and memory limits on shared hosting
+5. **WebSocket support**: May be limited - Socket.IO will fallback to polling
+6. **File system**: Limited access to certain directories
+
+## Alternative: Development Version Setup
+
+If you want to run a development version on Hostinger:
+
+### Option 1: Separate Subdomain
+
+1. Create a subdomain (e.g., `dev.yourdomain.com`)
+2. Create a separate Node.js app pointing to a different directory
+3. Use development environment variables:
+   ```env
+   NODE_ENV=development
+   PORT=3001
+   CLIENT_URL=https://dev.yourdomain.com
+   ```
+
+### Option 2: Development Branch
+
+1. Keep development files in a separate folder (e.g., `dev/`)
+2. Create a separate Node.js app for development
+3. Use different database (e.g., `yourusername_virtualoffice_dev`)
+
+### Option 3: Local Development + Production on Hostinger
+
+- Develop locally using `npm run dev`
+- Deploy only production builds to Hostinger
+- Use Git to manage versions
+
+## Updates and Maintenance
+
+### Update Application
+
+1. **Build locally**:
+   ```bash
+   cd client
+   npm run build
+   ```
+
+2. **Upload changes** via FTP:
+   - Upload new `client/build` contents
+   - Upload updated `server` files if changed
+   - Upload updated `package.json` if dependencies changed
+
+3. **Install dependencies** (if needed):
+   - In Node.js App Manager, click "Install Dependencies"
+
+4. **Restart application**:
+   - In Node.js App Manager, click "Restart"
+
+### Database Backups
+
+1. Go to **phpMyAdmin** in cPanel
+2. Select your database
+3. Click **Export**
+4. Choose **Quick** or **Custom** method
+5. Click **Go** to download backup
+
+Set up automatic backups via cPanel **Backup** feature if available.
+
+## Performance Tips for Shared Hosting
+
+1. **Optimize images**: Compress images before upload
+2. **Enable caching**: Configure browser caching headers
+3. **Minimize dependencies**: Only install production dependencies
+4. **Use CDN**: Consider using a CDN for static assets
+5. **Database optimization**: Regularly optimize database tables in phpMyAdmin
+6. **Monitor resources**: Check resource usage in cPanel
+
+## Support Resources
+
+- Hostinger Support: Check their knowledge base for Node.js deployment
+- Application logs: Node.js App Manager → Application Logs
+- Error logs: cPanel → Error Logs
+- Database: phpMyAdmin for database issues
+
+---
+
+## Quick Reference Checklist for Hostinger
+
+- [ ] Database created in cPanel MySQL Databases
+- [ ] Database user created and granted privileges
+- [ ] React app built locally (`npm run build`)
+- [ ] Files uploaded via FTP/File Manager
+- [ ] Node.js app created in cPanel
+- [ ] Environment variables configured
+- [ ] Dependencies installed
+- [ ] Database initialized (schema created)
+- [ ] Upload directories have write permissions (755/775)
+- [ ] SSL certificate installed
+- [ ] Application restarted
+- [ ] Tested registration/login
+- [ ] Tested room creation
+- [ ] Tested audio/video calls
+
